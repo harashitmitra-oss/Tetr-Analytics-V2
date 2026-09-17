@@ -144,17 +144,6 @@ def inject_css():
         }}
         div[data-testid="stMetric"] label {{ color: {GREEN_2} !important; font-weight: 700 !important; }}
         h1, h2, h3 {{ color: {DARK} !important; }}
-        .stRadio [role="radiogroup"] label {{
-            background: #eaf7ee !important;
-            border: 1px solid #cfe8d9 !important;
-            border-radius: 12px !important;
-            padding: 10px 12px !important;
-            margin-bottom: 8px !important;
-            width: 100% !important;
-        }}
-        .stRadio [role="radiogroup"] label:hover {{ background: #def2e6 !important; }}
-        .stRadio [role="radiogroup"] label p {{ color: #0b3d2e !important; font-weight: 700 !important; width:100% !important; }}
-        .stRadio [role="radiogroup"] > label, .stRadio [role="radiogroup"] div[role="radiogroup"] > label {{ width:100% !important; display:flex !important; }}
         .stTabs [data-baseweb="tab-list"] {{ gap: 8px; }}
         .stTabs [data-baseweb="tab"] {{
             background: #edf8f1;
@@ -220,135 +209,123 @@ def inject_css():
             font-size: 12px;
             margin: 4px 0 8px 2px;
         }}
-        section[data-testid="stSidebar"] div.stButton {{
-            margin: 0 0 7px 0 !important;
-        }}
-        section[data-testid="stSidebar"] div.stButton > button,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {{
-            display: flex !important;
-            align-items: center !important;
-            justify-content: flex-start !important;
-            text-align: left !important;
-            width: 100% !important;
-            box-sizing: border-box !important;
-            padding: 9px 12px 9px 16px !important;
-            border-radius: 11px !important;
-            border: 1px solid #cfe8d9 !important;
-            border-left: 5px solid transparent !important;
-            background: #ffffff !important;
-            color: #12372a !important;
-            text-decoration: none !important;
-            font-weight: 800 !important;
-            line-height: 1.15 !important;
-            box-shadow: 0 2px 8px rgba(11, 61, 46, 0.035) !important;
-            min-height: 38px !important;
-            transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease !important;
-        }}
-        section[data-testid="stSidebar"] div.stButton > button:hover,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {{
-            background: #eef8f2 !important;
-            border-color: #b7dec7 !important;
-            border-left-color: #b7dec7 !important;
-            color: #0b3d2e !important;
-            transform: translateX(2px);
-        }}
-        section[data-testid="stSidebar"] div.stButton > button p,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
-        section[data-testid="stSidebar"] div.stButton > button div[data-testid="stMarkdownContainer"],
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] {{
-            text-align: left !important;
-            width: 100% !important;
-            font-weight: 800 !important;
-            display: block !important;
-        }}
+        /* =========================================================
+           MAIN SIDEBAR NAVIGATION
+           Button-based so native radio dots can never appear.
+           Scoped to the Navigation container only; Data Source is untouched.
+           ========================================================= */
+        .st-key-main_nav_container {
+            margin-top: 2px;
+            margin-bottom: 10px;
+        }
 
-        /* Punjab-style compact navigation selector.
-           Uses native Streamlit radio behavior, so section switching stays
-           smooth in the same page with no URL links or redirect blink. */
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] {{
-            display: flex !important;
-            flex-direction: column !important;
-            gap: 6px !important;
-            width: 100% !important;
-            margin-top: 4px !important;
-        }}
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {{
-            position: relative !important;
+        .st-key-main_nav_container div[data-testid="stButton"] {
+            margin: 0 0 5px 0 !important;
+        }
+
+        .st-key-main_nav_container div[data-testid="stButton"] > button {
             display: flex !important;
             align-items: center !important;
             justify-content: flex-start !important;
+            gap: 9px !important;
             width: 100% !important;
+            min-height: 39px !important;
             box-sizing: border-box !important;
-            min-height: 40px !important;
+
+            padding: 7px 11px 7px 12px !important;
             margin: 0 !important;
-            padding: 0 12px 0 52px !important;
-            border-radius: 12px !important;
+
+            border-radius: 11px !important;
             border: 1px solid transparent !important;
+            border-left: 5px solid transparent !important;
+
             background: transparent !important;
+            color: #173f31 !important;
+
             box-shadow: none !important;
-            color: #12372a !important;
-            cursor: pointer !important;
-            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease !important;
-        }}
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {{
-            background: #eef8f2 !important;
-            border-color: #d6eadc !important;
-            color: #0b3d2e !important;
-            transform: none !important;
-        }}
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) {{
-            background: #dff3e7 !important;
-            border-color: #8fcaab !important;
-            color: #0b3d2e !important;
-            box-shadow: none !important;
-        }}
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked)::before {{
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 6px;
-            bottom: 6px;
-            width: 6px;
-            border-radius: 999px;
-            background: #1f7a56;
-        }}
-        /* Hide the native radio dot while preserving native radio behavior. */
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input[type="radio"]) > div:first-child {{
-            display: none !important;
-            width: 0 !important;
-            min-width: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-        }}
-        /* Force every radio text wrapper to align left, overriding Streamlit/BaseWeb centering. */
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input[type="radio"]) > div:not(:first-child),
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label div[data-testid="stMarkdownContainer"],
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label div[data-testid="stMarkdownContainer"] p,
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label p {{
-            width: 100% !important;
-            flex: 1 1 auto !important;
-            display: block !important;
             text-align: left !important;
-            justify-content: flex-start !important;
-            align-items: center !important;
-            margin: 0 !important;
-            margin-left: 0 !important;
-            margin-right: auto !important;
-            padding: 0 !important;
-            color: #12372a !important;
             font-weight: 650 !important;
-            font-size: 0.93rem !important;
-            line-height: 1.15 !important;
+
+            transition:
+                background 0.12s ease,
+                border-color 0.12s ease,
+                transform 0.12s ease,
+                box-shadow 0.12s ease !important;
+        }
+
+        .st-key-main_nav_container div[data-testid="stButton"] > button:hover {
+            background: #eef8f2 !important;
+            border-color: #d1e8da !important;
+            border-left-color: #a7d5b9 !important;
+            color: #0b3d2e !important;
+            transform: translateX(1px);
+        }
+
+        /* Active navigation section */
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button[data-testid="stBaseButton-primary"],
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button[kind="primary"] {
+            background: #dff3e7 !important;
+            border-color: #94cfae !important;
+            border-left-color: #1f7a56 !important;
+            color: #0b3d2e !important;
+            box-shadow: 0 3px 10px rgba(31, 122, 86, 0.08) !important;
+            font-weight: 800 !important;
+        }
+
+        .st-key-main_nav_container div[data-testid="stButton"] > button p,
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button div[data-testid="stMarkdownContainer"],
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button div[data-testid="stMarkdownContainer"] p {
+            width: auto !important;
+            flex: 1 1 auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            text-align: left !important;
+            color: inherit !important;
+            font-weight: inherit !important;
+            font-size: 0.91rem !important;
+            line-height: 1.16 !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-        }}
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) div[data-testid="stMarkdownContainer"],
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) div[data-testid="stMarkdownContainer"] p,
-        section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) p {{
-            color: #0b3d2e !important;
-            font-weight: 800 !important;
-        }}
+        }
+
+        .st-key-main_nav_container div[data-testid="stButton"] > button svg {
+            flex: 0 0 auto !important;
+            width: 18px !important;
+            height: 18px !important;
+            color: #536b60 !important;
+        }
+
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button[data-testid="stBaseButton-primary"] svg,
+        .st-key-main_nav_container
+        div[data-testid="stButton"]
+        > button[kind="primary"] svg {
+            color: #1f7a56 !important;
+        }
+
+        /* Compact Data Source radio.
+           Deliberately separate from Navigation. */
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] {
+            margin-bottom: 4px;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+            margin-bottom: 2px !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stFileUploader"] {
+            margin-bottom: 14px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -13099,13 +13076,37 @@ def inject_sidebar_nav_icon_css(visible_pages):
     st.markdown("<style>" + "\n".join(rules) + "</style>", unsafe_allow_html=True)
 
 
-def render_active_left_border_nav(visible_pages, current_page: str) -> str:
-    """Render Option A navigation using native Streamlit radio behavior.
+NAV_MATERIAL_ICONS = {
+    "Overview": ":material/dashboard:",
+    "Recent Activity": ":material/history:",
+    "Success Metrics": ":material/monitoring:",
+    "Student Profile": ":material/person_search:",
+    "UG": ":material/school:",
+    "PG": ":material/workspace_premium:",
+    "Gap Year": ":material/travel_explore:",
+    "Tetr App": ":material/apps:",
+    "Courses": ":material/menu_book:",
+    "UG vs PG": ":material/compare_arrows:",
+    "Tetr-X": ":material/verified:",
+    "T-7 & T+7 Analysis": ":material/date_range:",
+    "Conversion": ":material/trending_up:",
+    "Retention": ":material/autorenew:",
+    "Refund Analytics": ":material/currency_exchange:",
+    "Community Impact": ":material/groups:",
+    "Activities": ":material/event_available:",
+    "Admin": ":material/admin_panel_settings:",
+    "Hritabh": ":material/insights:",
+}
 
-    This keeps section changes smooth inside the same Streamlit page. It does
-    not create `?section=` browser links, so there is no URL redirect blink.
-    The radio is styled through CSS to look like rounded left-aligned menu
-    buttons with an active green left border.
+
+def render_active_left_border_nav(visible_pages, current_page: str) -> str:
+    """Compact same-page sidebar navigation.
+
+    Uses Streamlit buttons instead of radio controls so:
+    - no native radio circles can appear,
+    - Data Source radio styling stays independent,
+    - the active section has a stable green left border,
+    - section changes remain on the same Streamlit page with no URL blink.
     """
     visible_pages = list(visible_pages or [])
     if not visible_pages:
@@ -13114,21 +13115,27 @@ def render_active_left_border_nav(visible_pages, current_page: str) -> str:
     if current_page not in visible_pages:
         current_page = "Overview" if "Overview" in visible_pages else visible_pages[0]
 
-    inject_sidebar_nav_icon_css(visible_pages)
+    # Remove stale state from the previous radio-navigation implementation.
+    st.session_state.pop("nav_page_radio_selector", None)
 
-    radio_key = "nav_page_radio_selector"
-    existing_radio_value = st.session_state.get(radio_key, "")
-    if existing_radio_value not in visible_pages:
-        st.session_state[radio_key] = current_page
+    with st.container(key="main_nav_container"):
+        for page_name in visible_pages:
+            button_type = "primary" if page_name == current_page else "secondary"
+            icon = NAV_MATERIAL_ICONS.get(page_name, ":material/chevron_right:")
 
-    selected_page = st.radio(
-        "Navigation sections",
-        visible_pages,
-        index=visible_pages.index(st.session_state.get(radio_key, current_page)) if st.session_state.get(radio_key, current_page) in visible_pages else visible_pages.index(current_page),
-        key=radio_key,
-        label_visibility="collapsed",
-    )
-    return selected_page
+            clicked = st.button(
+                page_name,
+                key=_nav_button_key(page_name),
+                type=button_type,
+                icon=icon,
+                use_container_width=True,
+            )
+
+            if clicked and page_name != current_page:
+                st.session_state["nav_page"] = page_name
+                safe_rerun()
+
+    return current_page
 
 
 def render_navigation_sidebar():
@@ -13141,6 +13148,7 @@ def render_navigation_sidebar():
     UI order: normal navigation first, Secret Navigation Space below it.
     """
     st.markdown("## Navigation")
+    st.caption("Analytics & operations")
 
     hidden_sections = get_hidden_nav_sections()
     expected = _safe_secret_value("NAV_ADMIN_PASSWORD", "tetr-admin")
@@ -13172,11 +13180,10 @@ def render_navigation_sidebar():
         # Backward compatible with any old URL that used ?nav=Page or ?nav_page=Page.
         query_page = _match_nav_page(_safe_get_query_param("nav"), visible_pages) or _match_nav_page(_safe_get_query_param("nav_page"), visible_pages)
 
-    radio_page = _match_nav_page(st.session_state.get("nav_page_radio_selector", ""), visible_pages)
     session_page = _match_nav_page(st.session_state.get("nav_page", ""), visible_pages)
-    # Prefer Streamlit widget/session state over old URL query params so the
-    # menu no longer depends on browser links and feels like the original radio.
-    current_page = radio_page or session_page or query_page or "Overview"
+    # Session state is the source of truth. Old query params remain only as a
+    # backwards-compatible fallback and no longer drive normal navigation.
+    current_page = session_page or query_page or "Overview"
     if current_page not in visible_pages:
         current_page = "Overview" if "Overview" in visible_pages else visible_pages[0]
 
