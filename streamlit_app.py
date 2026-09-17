@@ -12484,7 +12484,18 @@ def admin_activities_page(store):
         "Columns are kept in ascending activity-date order from column T onward."
     )
 
-    batch_df = store.list_batches()
+    try:
+        batch_df = store.list_batches()
+    except Exception as e:
+        st.error(
+            "Could not read Batch_Master from Google Sheets. "
+            "The app will retry temporary quota/service errors automatically. "
+            "Please wait a few seconds and reload this Admin section."
+        )
+        with st.expander("Technical error details", expanded=False):
+            st.exception(e)
+        return
+
     if batch_df is None or batch_df.empty:
         batch_df = pd.DataFrame(columns=["Program", "Batch", "Active"])
     else:
