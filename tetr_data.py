@@ -19,6 +19,7 @@ GSHEETS_SCOPES = [
 ]
 
 CYCLE = "2026-27"
+ADMIN_DATA_VERSION = "2026-09-17-activity-create-v3"
 
 MASTER_HEADERS = [
     "Student ID", "Student Name", "Email", "Mobile", "Country", "Income",
@@ -170,6 +171,23 @@ def _best_header(headers, aliases):
             if na and na in k:
                 return idx
     return None
+
+
+
+def _safe_activity_target_sort_key(target):
+    """Sort (program, batch) without ever converting a label like 'B1' directly."""
+    try:
+        program, batch = target
+    except Exception:
+        return (99, 999999, "", "")
+
+    program = clean(program).upper()
+    batch = normalize_batch(batch)
+
+    program_order = {"UG": 0, "PG": 1, "GY": 2}
+    match = re.search(r"(\d+)", batch)
+    batch_number = int(match.group(1)) if match else 999999
+    return (program_order.get(program, 9), batch_number, program, batch)
 
 
 @dataclass
@@ -457,6 +475,110 @@ class GoogleStore:
                 self.log("Edit student", "Student", student_id, program, sheet=title, field=field, old=old, new=new_value)
                 return
         raise ValueError("Student ID not found.")
+
+    def create_activity_safe(self, *, name, activity_date, activity_type, targets, source="Admin"):
+        """Create one activity across selected program/batch targets safely.
+
+        This is the 2026-27 Admin UI entry point. It intentionally does not use
+        the older target-sort expression that caused int("B1") failures.
+        """
+        if not clean(name):
+            raise ValueError("Activity name is required.")
+
+        normalized_targets = []
+        seen = set()
+
+        for item in targets or []:
+            if isinstance(item, dict):
+                program = clean(item.get("Program", item.get("program", ""))).upper()
+                batch = normalize_batch(item.get("Batch", item.get("batch", "")))
+            else:
+                if not isinstance(item, (tuple, list)) or len(item) != 2:
+                    raise ValueError("Each activity target must contain Program and Batch.")
+                program = clean(item[0]).upper()
+                batch = normalize_batch(item[1])
+
+            if program not in {"UG", "PG", "GY"}:
+                continue
+            if not batch:
+                continue
+
+            key = (program, batch)
+            if key not in seen:
+                seen.add(key)
+                normalized_targets.append(key)
+
+        if not normalized_targets:
+            raise ValueError("Select at least one UG / PG / GY batch for the activity.")
+
+        normalized_targets = sorted(
+            normalized_targets,
+            key=_safe_activity_target_sort_key,
+        )
+
+        activity_id = _unique_id("ACT")
+        target_sheet_names = [
+            batch_sheet_name(program, batch)
+            for program, batch in normalized_targets
+        ]
+        programs_label = ", ".join(
+            dict.fromkeys(program for program, _ in normalized_targets)
+        )
+
+        # Write the register first.
+        activity_master = self.ensure_tab("Activity_Master", ACTIVITY_MASTER_HEADERS)
+        activity_master.append_row(
+            [
+                activity_id,
+                CYCLE,
+                clean(name),
+                clean(activity_date),
+                clean(activity_type),
+                programs_label,
+                ", ".join(target_sheet_names),
+                clean(source),
+                now_iso(),
+                self.admin_user,
+            ],
+            value_input_option="USER_ENTERED",
+        )
+
+        # Then create exactly one activity column in each selected batch.
+        created_targets = []
+        try:
+            for program, batch in normalized_targets:
+                self._ensure_activity_column(
+                    program,
+                    batch,
+                    activity_id,
+                    name,
+                    activity_type,
+                    activity_date,
+                )
+                created_targets.append((program, batch))
+        except Exception as exc:
+            # Leave an explicit audit trail if the register succeeded but a sheet write failed.
+            self.log(
+                "Create activity failed",
+                "Activity",
+                activity_id,
+                programs_label,
+                ", ".join(target_sheet_names),
+                "Activity_Master",
+                details=f"{name} | error: {exc}",
+            )
+            raise
+
+        self.log(
+            "Create activity",
+            "Activity",
+            activity_id,
+            programs_label,
+            ", ".join(target_sheet_names),
+            "Activity_Master",
+            details=f"{name} | {activity_type} | {activity_date}",
+        )
+        return activity_id
 
     def create_activity(self, *, name, activity_date, activity_type, program=None, batches=None, targets=None, source="Admin"):
         """Create one activity across one or many program/batch targets.
