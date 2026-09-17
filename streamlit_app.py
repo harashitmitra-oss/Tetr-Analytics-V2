@@ -18,7 +18,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # These helper modules use the SAME Google service-account connection and
 # COMMUNITY_MASTER_SPREADSHEET_ID already configured in Streamlit Secrets.
 try:
-    from tetr_data import GoogleStore, CYCLE, clean as admin_clean, normalize_batch as admin_normalize_batch
+    from tetr_data import GoogleStore, CYCLE, ADMIN_DATA_VERSION, clean as admin_clean, normalize_batch as admin_normalize_batch
     from attendance_parsers import read_uploaded_table, standardize_attendance, detect_format
     ADMIN_MODULES_AVAILABLE = True
     ADMIN_MODULE_IMPORT_ERROR = ""
@@ -12477,6 +12477,7 @@ def admin_batches_page(store):
 
 def admin_activities_page(store):
     st.subheader("Activities")
+    st.caption(f"Admin data module: {ADMIN_DATA_VERSION}")
     st.caption(
         "Each activity gets exactly one batch-sheet column: row 1 = type, "
         "row 2 = activity name, row 3 = date, row 6 = Activity ID. "
@@ -12564,7 +12565,7 @@ def admin_activities_page(store):
         disabled=not bool(selected_targets),
     ):
         try:
-            aid = store.create_activity(
+            aid = store.create_activity_safe(
                 name=name,
                 activity_date=activity_date.isoformat(),
                 activity_type=activity_type,
@@ -12577,6 +12578,8 @@ def admin_activities_page(store):
             )
         except Exception as e:
             st.error(str(e))
+            with st.expander("Technical error details", expanded=False):
+                st.exception(e)
 
     # ---------------- One-click repair for sheets already affected by old merge ----------------
     with st.expander("Fix / sort existing activity columns", expanded=False):
