@@ -20,7 +20,7 @@ GSHEETS_SCOPES = [
 ]
 
 CYCLE = "2026-27"
-ADMIN_DATA_VERSION = "2026-09-17-gspread-v4"
+ADMIN_DATA_VERSION = "2026-09-17-store-refresh-v5"
 
 MASTER_HEADERS = [
     "Student ID", "Student Name", "Email", "Mobile", "Country", "Income",
