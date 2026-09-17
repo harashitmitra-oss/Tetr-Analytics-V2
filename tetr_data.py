@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import time
 import re
 import uuid
 from typing import Iterable
 
 import pandas as pd
 import gspread
-from gspread.exceptions import WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound, APIError
 from google.oauth2.service_account import Credentials
 
 
@@ -19,7 +20,7 @@ GSHEETS_SCOPES = [
 ]
 
 CYCLE = "2026-27"
-ADMIN_DATA_VERSION = "2026-09-17-activity-create-v3"
+ADMIN_DATA_VERSION = "2026-09-17-gspread-v4"
 
 MASTER_HEADERS = [
     "Student ID", "Student Name", "Email", "Mobile", "Country", "Income",
@@ -201,21 +202,99 @@ class GoogleStore:
         self.gc = gspread.authorize(creds)
         self.book = self.gc.open_by_key(self.master_spreadsheet_id)
 
+        # Lightweight in-process caches. Streamlit reruns the script for every
+        # widget change, but the cached GoogleStore resource survives those reruns.
+        # This prevents repeated Google Sheets reads while typing/selecting values.
+        self._ensured_tabs = set()
+        self._batch_cache_df = None
+        self._batch_cache_at = 0.0
+        self._sheet_names_cache = None
+        self._sheet_names_cache_at = 0.0
+
+    @staticmethod
+    def _api_status_code(exc):
+        response = getattr(exc, "response", None)
+        return getattr(response, "status_code", None)
+
+    def _google_call(self, fn, *args, retries=5, **kwargs):
+        """Retry transient Google Sheets errors with exponential backoff.
+
+        429 = quota/rate limit.
+        5xx = temporary Google service errors.
+        Non-transient errors (e.g. permission/invalid request) are raised
+        immediately so configuration problems are not hidden.
+        """
+        delay = 1.0
+        for attempt in range(retries):
+            try:
+                return fn(*args, **kwargs)
+            except APIError as exc:
+                status = self._api_status_code(exc)
+                retryable = status in {429, 500, 502, 503, 504}
+
+                # Some gspread/Google responses expose quota information only
+                # in the body/message. Keep this check conservative.
+                msg = str(exc).lower()
+                if status is None and any(
+                    token in msg
+                    for token in [
+                        "quota",
+                        "rate limit",
+                        "resource_exhausted",
+                        "backend error",
+                        "internal error",
+                        "temporarily unavailable",
+                    ]
+                ):
+                    retryable = True
+
+                if (not retryable) or attempt == retries - 1:
+                    raise
+
+                time.sleep(delay)
+                delay = min(delay * 2, 8.0)
+
     def worksheet(self, title: str):
-        return self.book.worksheet(title)
+        return self._google_call(self.book.worksheet, title)
 
     def worksheet_or_create(self, title: str, rows=1000, cols=30):
         try:
-            return self.book.worksheet(title)
+            return self._google_call(self.book.worksheet, title)
         except WorksheetNotFound:
-            return self.book.add_worksheet(title=title, rows=rows, cols=cols)
+            ws = self._google_call(
+                self.book.add_worksheet,
+                title=title,
+                rows=rows,
+                cols=cols,
+            )
+            self._sheet_names_cache = None
+            self._sheet_names_cache_at = 0.0
+            return ws
 
     def ensure_tab(self, title: str, headers: list[str]):
-        ws = self.worksheet_or_create(title, rows=max(1000, len(headers) + 20), cols=max(30, len(headers) + 5))
-        values = ws.get_all_values()
-        if not values or not any(clean(x) for x in values[0]):
-            ws.update("A1", [headers], value_input_option="USER_ENTERED")
-            ws.freeze(rows=1)
+        ws = self.worksheet_or_create(
+            title,
+            rows=max(1000, len(headers) + 20),
+            cols=max(30, len(headers) + 5),
+        )
+
+        # Once a tab has been verified during this app process, do not read it
+        # again merely to confirm that headers still exist.
+        if title in self._ensured_tabs:
+            return ws
+
+        # Read only row 1 instead of get_all_values() for the entire worksheet.
+        first_row = self._google_call(ws.row_values, 1)
+        if not first_row or not any(clean(x) for x in first_row):
+            self._google_call(
+                ws.update,
+                "A1",
+                [headers],
+                value_input_option="USER_ENTERED",
+            )
+            self._google_call(ws.freeze, rows=1)
+
+        self._ensured_tabs.add(title)
         return ws
 
     def ensure_schema(self):
@@ -246,23 +325,89 @@ class GoogleStore:
 
     def log(self, action, entity="", entity_id="", program="", batch="", sheet="", field="", old="", new="", details=""):
         ws = self.ensure_tab("Admin_Audit_Log", AUDIT_HEADERS)
-        ws.append_row([
-            now_iso(), self.admin_user, action, entity, entity_id, program, batch,
-            sheet, field, clean(old), clean(new), clean(details)
-        ], value_input_option="USER_ENTERED")
+        self._google_call(
+            ws.append_row,
+            [
+                now_iso(), self.admin_user, action, entity, entity_id,
+                program, batch, sheet, field, clean(old), clean(new),
+                clean(details)
+            ],
+            value_input_option="USER_ENTERED",
+        )
 
-    def list_sheet_names(self):
-        return [w.title for w in self.book.worksheets()]
+    def list_sheet_names(self, max_age_seconds=30):
+        now = time.monotonic()
+        if (
+            self._sheet_names_cache is not None
+            and now - self._sheet_names_cache_at < max_age_seconds
+        ):
+            return list(self._sheet_names_cache)
 
-    def list_batches(self, program: str | None = None) -> pd.DataFrame:
-        ws = self.ensure_tab("Batch_Master", BATCH_MASTER_HEADERS)
-        rows = ws.get_all_records()
-        df = pd.DataFrame(rows)
-        if df.empty:
-            return pd.DataFrame(columns=BATCH_MASTER_HEADERS)
+        names = [
+            w.title
+            for w in self._google_call(self.book.worksheets)
+        ]
+        self._sheet_names_cache = list(names)
+        self._sheet_names_cache_at = now
+        return names
+
+    def list_batches(self, program: str | None = None, max_age_seconds=30) -> pd.DataFrame:
+        now = time.monotonic()
+
+        if (
+            self._batch_cache_df is None
+            or now - self._batch_cache_at >= max_age_seconds
+        ):
+            ws = self.worksheet_or_create(
+                "Batch_Master",
+                rows=1000,
+                cols=max(30, len(BATCH_MASTER_HEADERS) + 5),
+            )
+
+            # One bounded read only. Batch_Master has seven columns and normally
+            # very few rows, so there is no reason to fetch the full worksheet.
+            rows = self._google_call(ws.get, "A1:G500")
+
+            if not rows or not any(clean(x) for x in rows[0]):
+                self._google_call(
+                    ws.update,
+                    "A1",
+                    [BATCH_MASTER_HEADERS],
+                    value_input_option="USER_ENTERED",
+                )
+                self._google_call(ws.freeze, rows=1)
+                rows = [BATCH_MASTER_HEADERS]
+
+            headers = [clean(x) for x in rows[0]]
+            records = []
+            for raw in rows[1:]:
+                padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+                if not any(clean(x) for x in padded):
+                    continue
+                records.append(dict(zip(headers, padded[:len(headers)])))
+
+            df = pd.DataFrame(records)
+            if df.empty:
+                df = pd.DataFrame(columns=BATCH_MASTER_HEADERS)
+            else:
+                for col in BATCH_MASTER_HEADERS:
+                    if col not in df.columns:
+                        df[col] = ""
+                df = df[BATCH_MASTER_HEADERS]
+
+            self._batch_cache_df = df.copy()
+            self._batch_cache_at = now
+            self._ensured_tabs.add("Batch_Master")
+
+        df = self._batch_cache_df.copy()
+
         if program:
-            df = df[df["Program"].astype(str).str.upper().eq(program.upper())]
-        return df
+            program_clean = clean(program).upper()
+            df = df[
+                df["Program"].astype(str).str.upper().eq(program_clean)
+            ].copy()
+
+        return df.reset_index(drop=True)
 
     def create_batch(self, program: str, batch: str, created_by: str | None = None, log_if_exists=True):
         program = clean(program).upper()
@@ -289,10 +434,28 @@ class GoogleStore:
         ws.freeze(rows=6, cols=2)
 
         bws = self.ensure_tab("Batch_Master", BATCH_MASTER_HEADERS)
-        bws.append_row([
-            CYCLE, program, batch, title, now_iso(), created_by or self.admin_user, "Yes"
-        ], value_input_option="USER_ENTERED")
-        self.log("Create batch", "Batch", title, program, batch, title, details=f"{CYCLE} batch created")
+        self._google_call(
+            bws.append_row,
+            [
+                CYCLE, program, batch, title, now_iso(),
+                created_by or self.admin_user, "Yes"
+            ],
+            value_input_option="USER_ENTERED",
+        )
+        self._batch_cache_df = None
+        self._batch_cache_at = 0.0
+        self._sheet_names_cache = None
+        self._sheet_names_cache_at = 0.0
+
+        self.log(
+            "Create batch",
+            "Batch",
+            title,
+            program,
+            batch,
+            title,
+            details=f"{CYCLE} batch created",
+        )
         return ws, True
 
     def _master_title(self, program: str) -> str:
