@@ -66,6 +66,12 @@ WINNER_HEADERS = [
     "Student ID", "Student Name", "Email", "Program", "Activity ID", "Activity",
     "Activity Date", "Amount Won", "Recorded At"
 ]
+
+CONVERSION_TRACKER_HEADERS = [
+    "Student Name", "Email", "Mobile", "Admissions Status", "Payment Date",
+    "Offer Date", "Deadline", "Counsellor Name", "Last Updated"
+]
+
 TETRAPP_HEADERS = [
     "Student ID", "Name", "Email", "Phone", "Program", "Registered At",
     "Activity", "Source", "Matched By"
@@ -120,6 +126,18 @@ def batch_sheet_name(program: str, batch: str) -> str:
 def _unique_id(prefix: str) -> str:
     stamp = pd.Timestamp.now(tz="Asia/Kolkata").strftime("%y%m%d%H%M%S")
     return f"{prefix}-{stamp}-{uuid.uuid4().hex[:4].upper()}"
+
+
+def _col_letter(col_num: int) -> str:
+    """1-based spreadsheet column number -> A1 column letters."""
+    col_num = int(col_num)
+    if col_num < 1:
+        raise ValueError("Column number must be >= 1")
+    out = ""
+    while col_num:
+        col_num, rem = divmod(col_num - 1, 26)
+        out = chr(65 + rem) + out
+    return out
 
 
 def student_id_from_identity(program: str, email: str, name: str, phone: str) -> str:
@@ -197,6 +215,9 @@ class GoogleStore:
             ("Winner", WINNER_HEADERS),
             ("TetrApp_Competitions", TETRAPP_HEADERS),
             ("TetrApp_Quizzes", TETRAPP_HEADERS),
+            ("UG Conversion Tracker", CONVERSION_TRACKER_HEADERS),
+            ("PG Conversion Tracker", CONVERSION_TRACKER_HEADERS),
+            ("Gap Year Conversion Tracker", CONVERSION_TRACKER_HEADERS),
             ("Tetr-X-UG", MASTER_HEADERS),
             ("Tetr-X-PG", MASTER_HEADERS),
         ]:
@@ -437,37 +458,334 @@ class GoogleStore:
                 return
         raise ValueError("Student ID not found.")
 
-    def create_activity(self, *, name, activity_date, activity_type, program, batches, source="Admin"):
+    def create_activity(self, *, name, activity_date, activity_type, program=None, batches=None, targets=None, source="Admin"):
+        """Create one activity across one or many program/batch targets.
+
+        Backward compatible with the older ``program + batches`` call.  The new
+        Admin UI can instead pass ``targets=[("UG", "B1"), ("PG", "B1"), ...]``.
+        Every target sheet gets the same Activity ID so one mixed attendance file
+        can later write to the correct UG/PG/GY batch automatically.
+        """
         if not clean(name):
             raise ValueError("Activity name is required.")
+
+        if targets is None:
+            p = clean(program).upper()
+            targets = [(p, normalize_batch(b)) for b in (batches or [])]
+
+        normalized_targets = []
+        seen = set()
+        for item in targets or []:
+            if isinstance(item, dict):
+                p = clean(item.get("Program", item.get("program", ""))).upper()
+                b = normalize_batch(item.get("Batch", item.get("batch", "")))
+            else:
+                try:
+                    p, b = item
+                except Exception:
+                    raise ValueError("Each activity target must contain Program and Batch.")
+                p = clean(p).upper()
+                b = normalize_batch(b)
+            if p not in {"UG", "PG", "GY"} or not b:
+                continue
+            key = (p, b)
+            if key not in seen:
+                seen.add(key)
+                normalized_targets.append(key)
+
+        if not normalized_targets:
+            raise ValueError("Select at least one UG / PG / GY batch for the activity.")
+
+        # Stable program order in Activity_Master.
+        program_order = {"UG": 0, "PG": 1, "GY": 2}
+        normalized_targets.sort(key=lambda x: (program_order.get(x[0], 9), int(re.sub(r"\\D", "", x[1]) or 999999)))
+
         activity_id = _unique_id("ACT")
-        program = clean(program).upper()
-        batches = [normalize_batch(b) for b in batches]
+        target_sheet_names = [batch_sheet_name(p, b) for p, b in normalized_targets]
+        programs_label = ", ".join(dict.fromkeys([p for p, _ in normalized_targets]))
+
         am = self.ensure_tab("Activity_Master", ACTIVITY_MASTER_HEADERS)
         am.append_row([
             activity_id, CYCLE, clean(name), clean(activity_date), clean(activity_type),
-            program, ", ".join(batches), clean(source), now_iso(), self.admin_user
+            programs_label, ", ".join(target_sheet_names), clean(source), now_iso(), self.admin_user
         ], value_input_option="USER_ENTERED")
-        for batch in batches:
-            self._ensure_activity_column(program, batch, activity_id, name, activity_type, activity_date)
-        self.log("Create activity", "Activity", activity_id, program, ",".join(batches), "Activity_Master", details=name)
+
+        for p, b in normalized_targets:
+            self._ensure_activity_column(p, b, activity_id, name, activity_type, activity_date)
+
+        self.log(
+            "Create activity", "Activity", activity_id, programs_label,
+            ", ".join(target_sheet_names), "Activity_Master",
+            details=f"{name} | {activity_type} | {activity_date}"
+        )
         return activity_id
 
+    def _unmerge_activity_metadata(self, ws, end_col=None):
+        """Remove accidental merges in activity metadata rows (1-3) from column T onward.
+
+        The 2026-27 structure requires exactly one activity type/name/date cell per
+        activity column.  This also repairs old template merges that made one event
+        type visually span several new columns.
+        """
+        end_col = max(int(end_col or ws.col_count or 20), 20)
+        try:
+            self.book.batch_update({
+                "requests": [{
+                    "unmergeCells": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 3,
+                            "startColumnIndex": 19,
+                            "endColumnIndex": end_col,
+                        }
+                    }
+                }]
+            })
+        except Exception:
+            # No merge / older gspread backend: safe to continue.
+            pass
+
+    @staticmethod
+    def _activity_date_value(value):
+        dt = pd.to_datetime(clean(value), errors="coerce", dayfirst=False)
+        if pd.isna(dt):
+            return pd.NaT
+        try:
+            return dt.normalize()
+        except Exception:
+            return dt
+
+    def repair_activity_layout(self, program, batch):
+        """Unmerge, de-ghost and date-sort the activity columns in one batch sheet.
+
+        Student data in A:S is untouched.  From T onward, every real activity is
+        compacted to one column and sorted by Activity Date ascending. Attendance
+        values move together with their activity metadata and Activity ID.
+        """
+        program = clean(program).upper()
+        batch = normalize_batch(batch)
+        ws, _ = self.create_batch(program, batch, log_if_exists=False)
+        rows = ws.get_all_values()
+        if len(rows) < 6:
+            return {"Sheet": ws.title, "Activities": 0, "Changed": False}
+
+        max_cols = max([len(r) for r in rows] + [20])
+        self._unmerge_activity_metadata(ws, max(max_cols, ws.col_count))
+
+        def cell(ridx, cidx):
+            if ridx < len(rows) and cidx < len(rows[ridx]):
+                return clean(rows[ridx][cidx])
+            return ""
+
+        # Activity_Master is the canonical metadata fallback. This is important for
+        # repairing older merged type headers: after unmerge, only the top-left
+        # cell of a merged range keeps its value, so a Competition column could
+        # otherwise lose its own type. Activity ID lets us restore it exactly.
+        activity_meta = {}
+        try:
+            am = self.ensure_tab("Activity_Master", ACTIVITY_MASTER_HEADERS)
+            for rec in am.get_all_records():
+                aid = clean(rec.get("Activity ID", ""))
+                if aid:
+                    activity_meta[aid] = {
+                        "type": clean(rec.get("Activity Type", "")),
+                        "name": clean(rec.get("Activity Name", "")),
+                        "date": clean(rec.get("Activity Date", "")),
+                    }
+        except Exception:
+            activity_meta = {}
+
+        event_cols = []
+        orphan_cols = []
+        max_touched = 19
+        for cidx in range(19, max_cols):
+            ev_type = cell(0, cidx)
+            ev_name = cell(1, cidx)
+            ev_date = cell(2, cidx)
+            ev_id = cell(5, cidx)
+            if ev_type or ev_name or ev_date or ev_id:
+                max_touched = max(max_touched, cidx)
+            # A real activity needs an ID, name, or date. A type by itself is a
+            # ghost left by an old merged header and must not occupy a column.
+            if ev_id or ev_name or ev_date:
+                event_cols.append(cidx)
+            elif ev_type:
+                orphan_cols.append(cidx)
+
+        def effective_meta(cidx):
+            ev_id = cell(5, cidx)
+            master = activity_meta.get(ev_id, {})
+            return {
+                "id": ev_id,
+                "type": master.get("type") or cell(0, cidx),
+                "name": master.get("name") or cell(1, cidx),
+                "date": master.get("date") or cell(2, cidx),
+            }
+
+        # Stable date sort; same-day events preserve their existing order.
+        def sort_key(cidx):
+            dt = self._activity_date_value(effective_meta(cidx)["date"])
+            if pd.isna(dt):
+                return (1, pd.Timestamp.max, cidx)
+            return (0, dt, cidx)
+
+        sorted_cols = sorted(event_cols, key=sort_key)
+        target_cols = list(range(19, 19 + len(sorted_cols)))
+        changed = sorted_cols != target_cols or bool(orphan_cols)
+
+        if max_touched >= 19:
+            last_row = max(len(rows), 6)
+            clear_range = f"T1:{_col_letter(max_touched + 1)}{last_row}"
+
+            # Snapshot the full values of every activity column BEFORE clearing.
+            # Rows 1/2/3 are rebuilt from Activity_Master when available so each
+            # column gets its own correct Type / Name / Date after unmerging.
+            matrix = []
+            for ridx in range(last_row):
+                row_values = []
+                for cidx in sorted_cols:
+                    if ridx == 0:
+                        row_values.append(effective_meta(cidx)["type"])
+                    elif ridx == 1:
+                        row_values.append(effective_meta(cidx)["name"])
+                    elif ridx == 2:
+                        row_values.append(effective_meta(cidx)["date"])
+                    else:
+                        row_values.append(cell(ridx, cidx))
+                matrix.append(row_values)
+
+            try:
+                ws.batch_clear([clear_range])
+            except Exception:
+                # Fallback for older gspread versions.
+                blank_width = max_touched - 19 + 1
+                ws.update(
+                    f"T1:{_col_letter(max_touched + 1)}{last_row}",
+                    [[""] * blank_width for _ in range(last_row)],
+                    value_input_option="USER_ENTERED",
+                )
+
+            if sorted_cols:
+                end_col = 19 + len(sorted_cols)  # 1-based column count for A1 helper below
+                ws.update(
+                    f"T1:{_col_letter(end_col)}{last_row}",
+                    matrix,
+                    value_input_option="USER_ENTERED",
+                )
+
+        return {"Sheet": ws.title, "Activities": len(sorted_cols), "Changed": changed}
+
+    def repair_all_activity_layouts(self, targets=None):
+        """Repair/sort all registered batch sheets or a supplied target list."""
+        if targets is None:
+            bdf = self.list_batches()
+            targets = []
+            if bdf is not None and not bdf.empty:
+                for _, r in bdf.iterrows():
+                    p = clean(r.get("Program", "")).upper()
+                    b = normalize_batch(r.get("Batch", ""))
+                    active = clean(r.get("Active", "Yes")).lower()
+                    if p in {"UG", "PG", "GY"} and b and active not in {"no", "false", "0"}:
+                        targets.append((p, b))
+
+        results = []
+        seen = set()
+        for p, b in targets or []:
+            p = clean(p).upper()
+            b = normalize_batch(b)
+            if (p, b) in seen or p not in {"UG", "PG", "GY"} or not b:
+                continue
+            seen.add((p, b))
+            try:
+                results.append(self.repair_activity_layout(p, b))
+            except Exception as e:
+                results.append({"Sheet": batch_sheet_name(p, b), "Activities": 0, "Changed": False, "Error": str(e)})
+        return pd.DataFrame(results)
+
+    def _insert_activity_column(self, ws, col_num):
+        """Insert one physical column before col_num, preserving attendance columns."""
+        col_num = int(col_num)
+        if col_num > ws.col_count:
+            ws.add_cols(col_num - ws.col_count)
+            return
+        try:
+            self.book.batch_update({
+                "requests": [{
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "dimension": "COLUMNS",
+                            "startIndex": col_num - 1,
+                            "endIndex": col_num,
+                        },
+                        "inheritFromBefore": True,
+                    }
+                }]
+            })
+        except Exception:
+            # Public gspread fallback.
+            ws.insert_cols([[""]], col=col_num, value_input_option="USER_ENTERED", inherit_from_before=True)
+
     def _ensure_activity_column(self, program, batch, activity_id, name, activity_type, activity_date):
+        # Repair old merged headers and put all existing activities in date order first.
+        self.repair_activity_layout(program, batch)
+
         ws, _ = self.create_batch(program, batch, log_if_exists=False)
         rows = ws.get_all_values()
         if len(rows) < 6:
             raise ValueError(f"Batch sheet {ws.title} does not have the expected six-row header.")
-        header = rows[5]
-        if activity_id in header:
-            return header.index(activity_id) + 1
 
-        # Ensure event columns start at T (20th column).
-        target_col = max(20, len(header) + 1)
-        current_cols = ws.col_count
-        if target_col > current_cols:
-            ws.add_cols(target_col - current_cols + 20)
+        max_cols = max([len(r) for r in rows] + [20])
+        self._unmerge_activity_metadata(ws, max(max_cols, ws.col_count))
 
+        def cell(ridx, cidx):
+            if ridx < len(rows) and cidx < len(rows[ridx]):
+                return clean(rows[ridx][cidx])
+            return ""
+
+        # Existing Activity ID -> nothing more to create.
+        for cidx in range(19, max_cols):
+            if cell(5, cidx) == activity_id:
+                return cidx + 1
+
+        existing = []
+        for cidx in range(19, max_cols):
+            ev_type = cell(0, cidx)
+            ev_name = cell(1, cidx)
+            ev_date_raw = cell(2, cidx)
+            ev_id = cell(5, cidx)
+            if ev_id or ev_name or ev_date_raw:
+                existing.append((cidx + 1, self._activity_date_value(ev_date_raw)))
+            elif ev_type:
+                # Orphan type-only cell from an old merged header: clear it.
+                try:
+                    ws.update_cell(1, cidx + 1, "")
+                except Exception:
+                    pass
+
+        new_dt = self._activity_date_value(activity_date)
+        target_col = 20
+        if existing:
+            # Insert before the first strictly later event. Same-day events stay together
+            # and the newly-created activity goes after existing same-day activities.
+            later_col = None
+            if pd.notna(new_dt):
+                for col_num, old_dt in existing:
+                    if pd.notna(old_dt) and old_dt > new_dt:
+                        later_col = col_num
+                        break
+            if later_col is not None:
+                target_col = later_col
+                self._insert_activity_column(ws, target_col)
+            else:
+                target_col = max(col for col, _ in existing) + 1
+                if target_col > ws.col_count:
+                    ws.add_cols(target_col - ws.col_count)
+        elif ws.col_count < 20:
+            ws.add_cols(20 - ws.col_count)
+
+        # One activity = one metadata cell in each row; no merging.
         ws.update_cell(1, target_col, clean(activity_type))
         ws.update_cell(2, target_col, clean(name))
         ws.update_cell(3, target_col, clean(activity_date))
