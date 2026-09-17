@@ -496,9 +496,22 @@ class GoogleStore:
         if not normalized_targets:
             raise ValueError("Select at least one UG / PG / GY batch for the activity.")
 
-        # Stable program order in Activity_Master.
+        # Stable program + numeric batch order in Activity_Master.
+        # Batch labels are strings such as B1, B2 and B10.
         program_order = {"UG": 0, "PG": 1, "GY": 2}
-        normalized_targets.sort(key=lambda x: (program_order.get(x[0], 9), int(re.sub(r"\\D", "", x[1]) or 999999)))
+
+        def _batch_number_for_sort(batch_value):
+            batch_text = normalize_batch(batch_value)
+            match = re.search(r"B(\d+)", batch_text, flags=re.I)
+            return int(match.group(1)) if match else 999999
+
+        normalized_targets.sort(
+            key=lambda x: (
+                program_order.get(x[0], 9),
+                _batch_number_for_sort(x[1]),
+                x[1],
+            )
+        )
 
         activity_id = _unique_id("ACT")
         target_sheet_names = [batch_sheet_name(p, b) for p, b in normalized_targets]
