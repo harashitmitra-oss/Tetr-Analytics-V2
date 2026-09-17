@@ -214,16 +214,16 @@ def inject_css():
            Button-based so native radio dots can never appear.
            Scoped to the Navigation container only; Data Source is untouched.
            ========================================================= */
-        .st-key-main_nav_container {
+        .st-key-main_nav_container {{
             margin-top: 2px;
             margin-bottom: 10px;
-        }
+        }}
 
-        .st-key-main_nav_container div[data-testid="stButton"] {
+        .st-key-main_nav_container div[data-testid="stButton"] {{
             margin: 0 0 5px 0 !important;
-        }
+        }}
 
-        .st-key-main_nav_container div[data-testid="stButton"] > button {
+        .st-key-main_nav_container div[data-testid="stButton"] > button {{
             display: flex !important;
             align-items: center !important;
             justify-content: flex-start !important;
@@ -251,15 +251,15 @@ def inject_css():
                 border-color 0.12s ease,
                 transform 0.12s ease,
                 box-shadow 0.12s ease !important;
-        }
+        }}
 
-        .st-key-main_nav_container div[data-testid="stButton"] > button:hover {
+        .st-key-main_nav_container div[data-testid="stButton"] > button:hover {{
             background: #eef8f2 !important;
             border-color: #d1e8da !important;
             border-left-color: #a7d5b9 !important;
             color: #0b3d2e !important;
             transform: translateX(1px);
-        }
+        }}
 
         /* Active navigation section */
         .st-key-main_nav_container
@@ -267,14 +267,14 @@ def inject_css():
         > button[data-testid="stBaseButton-primary"],
         .st-key-main_nav_container
         div[data-testid="stButton"]
-        > button[kind="primary"] {
+        > button[kind="primary"] {{
             background: #dff3e7 !important;
             border-color: #94cfae !important;
             border-left-color: #1f7a56 !important;
             color: #0b3d2e !important;
             box-shadow: 0 3px 10px rgba(31, 122, 86, 0.08) !important;
             font-weight: 800 !important;
-        }
+        }}
 
         .st-key-main_nav_container div[data-testid="stButton"] > button p,
         .st-key-main_nav_container
@@ -282,7 +282,7 @@ def inject_css():
         > button div[data-testid="stMarkdownContainer"],
         .st-key-main_nav_container
         div[data-testid="stButton"]
-        > button div[data-testid="stMarkdownContainer"] p {
+        > button div[data-testid="stMarkdownContainer"] p {{
             width: auto !important;
             flex: 1 1 auto !important;
             margin: 0 !important;
@@ -295,37 +295,37 @@ def inject_css():
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-        }
+        }}
 
-        .st-key-main_nav_container div[data-testid="stButton"] > button svg {
+        .st-key-main_nav_container div[data-testid="stButton"] > button svg {{
             flex: 0 0 auto !important;
             width: 18px !important;
             height: 18px !important;
             color: #536b60 !important;
-        }
+        }}
 
         .st-key-main_nav_container
         div[data-testid="stButton"]
         > button[data-testid="stBaseButton-primary"] svg,
         .st-key-main_nav_container
         div[data-testid="stButton"]
-        > button[kind="primary"] svg {
+        > button[kind="primary"] svg {{
             color: #1f7a56 !important;
-        }
+        }}
 
         /* Compact Data Source radio.
            Deliberately separate from Navigation. */
-        section[data-testid="stSidebar"] div[data-testid="stRadio"] {
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] {{
             margin-bottom: 4px;
-        }
+        }}
 
-        section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] label {{
             margin-bottom: 2px !important;
-        }
+        }}
 
-        section[data-testid="stSidebar"] div[data-testid="stFileUploader"] {
+        section[data-testid="stSidebar"] div[data-testid="stFileUploader"] {{
             margin-bottom: 14px;
-        }
+        }}
         </style>
         """,
         unsafe_allow_html=True,
