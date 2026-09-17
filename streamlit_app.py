@@ -12177,9 +12177,15 @@ def _admin_clear_analytics_cache():
 
 
 @st.cache_resource(show_spinner=False)
-def _cached_admin_store(spreadsheet_id: str, admin_name: str, service_account_email: str):
-    # service_account_email is part of the cache key so rotating credentials
-    # does not accidentally reuse a stale store object.
+def _cached_admin_store(
+    spreadsheet_id: str,
+    admin_name: str,
+    service_account_email: str,
+    admin_data_version: str,
+):
+    # The data-module version is intentionally part of the cache key.
+    # If tetr_data.py changes, Streamlit must create a fresh GoogleStore
+    # instead of reusing an instance created from an older class definition.
     return GoogleStore(
         dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"]),
         spreadsheet_id,
@@ -12212,7 +12218,38 @@ def get_admin_store():
         or st.secrets.get("ADMIN_DEFAULT_NAME", "Community Admin")
     )
     service_email = st.secrets["GOOGLE_SERVICE_ACCOUNT"].get("client_email", "")
-    return _cached_admin_store(spreadsheet_id, admin_name, service_email)
+
+    store = _cached_admin_store(
+        spreadsheet_id,
+        admin_name,
+        service_email,
+        ADMIN_DATA_VERSION,
+    )
+
+    # Extra protection for Streamlit hot-reload/cached-object edge cases.
+    # If a stale GoogleStore somehow survived from an older deployment,
+    # discard the cached resource and recreate it immediately.
+    if not hasattr(store, "create_activity_safe"):
+        try:
+            _cached_admin_store.clear()
+        except Exception:
+            pass
+
+        store = _cached_admin_store(
+            spreadsheet_id,
+            admin_name,
+            service_email,
+            ADMIN_DATA_VERSION,
+        )
+
+    if not hasattr(store, "create_activity_safe"):
+        raise RuntimeError(
+            "Admin code version mismatch: the loaded tetr_data.py does not "
+            "contain create_activity_safe(). Upload the matching streamlit_app.py "
+            "and tetr_data.py from the same release, then reboot the Streamlit app."
+        )
+
+    return store
 
 
 def _admin_login_inline():
@@ -12834,6 +12871,17 @@ def admin_audit_page(store):
 def admin_connection_page(store):
     st.subheader("Connection Health")
     st.success(f"Connected to master workbook: {store.book.title}")
+    st.write("Admin data module:", ADMIN_DATA_VERSION)
+    st.write("Safe activity creator loaded:", hasattr(store, "create_activity_safe"))
+
+    if st.button("Refresh Admin connection object", key="refresh_admin_store"):
+        try:
+            _cached_admin_store.clear()
+        except Exception:
+            pass
+        st.cache_data.clear()
+        st.success("Admin connection cache cleared. Reloading...")
+        safe_rerun()
     st.write(
         "Service account:",
         st.secrets["GOOGLE_SERVICE_ACCOUNT"].get("client_email", ""),
@@ -12859,6 +12907,7 @@ def render_admin_panel(cfg=None):
     st.caption(
         "2026–27 data operations · same Google connection · Analytics calculations remain unchanged."
     )
+    st.caption(f"Admin runtime: {ADMIN_DATA_VERSION}")
 
     if not ADMIN_MODULES_AVAILABLE:
         st.error(
